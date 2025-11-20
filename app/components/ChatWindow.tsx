@@ -31,58 +31,64 @@ export default function ChatWindow({ recipientId }: Props) {
   const [text, setText] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  const loadConversation = useCallback(async () => {
-    if (!user || !recipientId) {
-      setMessages([]);
-      return;
-    }
+  /** ---------------------------------------------------
+   * Load conversation + profiles
+   ---------------------------------------------------- */
+  const loadConversation = useCallback(
+    async (uid: string, rid: string) => {
+      const { data: messageRows } = await supabase
+        .from("messages")
+        .select("*")
+        .or(
+          `and(sender_id.eq.${uid},receiver_id.eq.${rid}),and(sender_id.eq.${rid},receiver_id.eq.${uid})`
+        )
+        .order("created_at", { ascending: true });
 
-    const { data } = await supabase
-      .from("messages")
-      .select("*")
-      .or(
-        `and(sender_id.eq.${user.id},receiver_id.eq.${recipientId}),and(sender_id.eq.${recipientId},receiver_id.eq.${user.id})`
-      )
-      .order("created_at", { ascending: true });
+      setMessages((messageRows ?? []) as MessageRow[]);
 
-    setMessages((data ?? []) as MessageRow[]);
+      // Load both profiles
+      const { data: profRows } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url")
+        .in("id", [uid, rid]);
 
-    // Profiles
-    const ids = [user.id, recipientId];
-    const { data: profRows } = await supabase
-      .from("profiles")
-      .select("id, display_name, avatar_url")
-      .in("id", ids);
+      const map: Record<string, Profile> = {};
+      (profRows ?? []).forEach((p) => (map[p.id] = p));
+      setProfiles(map);
+    },
+    []
+  );
 
-    const map: Record<string, Profile> = {};
-    (profRows ?? []).forEach((p) => (map[p.id] = p));
-    setProfiles(map);
-  }, [user, recipientId]);
-
+  /** ---------------------------------------------------
+   * Load conversation when user or recipient changes
+   ---------------------------------------------------- */
   useEffect(() => {
     if (!user || !recipientId) return;
-
-    (async () => {
-      await loadConversation();
-    })();
+    const fetchConversation = async () => {
+      await loadConversation(user.id, recipientId);
+    };
+    fetchConversation();
   }, [user, recipientId, loadConversation]);
 
-  // realtime
+  /** ---------------------------------------------------
+   * Real-time subscription
+   ---------------------------------------------------- */
   useEffect(() => {
-    if (!user) return;
+    if (!user || !recipientId) return;
 
     const channel = supabase
       .channel("messages-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
-        async (payload) => {
+        (payload) => {
           const m = payload.new as MessageRow;
 
-          if (
+          const belongsToThisChat =
             (m.sender_id === user.id && m.receiver_id === recipientId) ||
-            (m.sender_id === recipientId && m.receiver_id === user.id)
-          ) {
+            (m.sender_id === recipientId && m.receiver_id === user.id);
+
+          if (belongsToThisChat) {
             setMessages((prev) => [...prev, m]);
           }
         }
@@ -94,12 +100,17 @@ export default function ChatWindow({ recipientId }: Props) {
     };
   }, [user, recipientId]);
 
-  // auto scroll
+  /** ---------------------------------------------------
+   * Auto-scroll on new messages
+   ---------------------------------------------------- */
   useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages]);
 
+  /** ---------------------------------------------------
+   * Send Message
+   ---------------------------------------------------- */
   const sendMessage = useCallback(
     async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
@@ -108,6 +119,7 @@ export default function ChatWindow({ recipientId }: Props) {
       const trimmed = text.trim();
       if (!trimmed) return;
 
+      // Local optimistic message
       const temp: MessageRow = {
         id: `temp-${Date.now()}`,
         sender_id: user.id,
@@ -128,6 +140,9 @@ export default function ChatWindow({ recipientId }: Props) {
     [user, recipientId, text]
   );
 
+  /** ---------------------------------------------------
+   * RENDER
+   ---------------------------------------------------- */
   if (loading) return <div>Loading chat...</div>;
   if (!recipientId)
     return (
@@ -138,6 +153,7 @@ export default function ChatWindow({ recipientId }: Props) {
 
   return (
     <div className="flex flex-col h-[70vh] bg-white rounded shadow">
+      {/* HEADER */}
       <header className="flex items-center gap-3 p-4 border-b">
         <Image
           src={friend?.avatar_url ?? "/avatar-placeholder.png"}
@@ -154,6 +170,7 @@ export default function ChatWindow({ recipientId }: Props) {
         </div>
       </header>
 
+      {/* MESSAGES */}
       <div ref={listRef} className="flex-1 overflow-auto p-4 space-y-3">
         {messages.map((m) => {
           const mine = user ? m.sender_id === user.id : false;
@@ -177,6 +194,7 @@ export default function ChatWindow({ recipientId }: Props) {
         })}
       </div>
 
+      {/* INPUT */}
       <form onSubmit={sendMessage} className="p-4 border-t flex gap-2">
         <input
           className="flex-1 border rounded px-3 py-2"
