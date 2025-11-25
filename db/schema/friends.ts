@@ -1,18 +1,9 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
-import { users } from "./users";
+import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core";
 
 export const friends = pgTable("friends", {
-  id: serial("id").primaryKey(),
-
-  senderId: integer("sender_id")
-    .references(() => users.id)
-    .notNull(),
-
-  receiverId: integer("receiver_id")
-    .references(() => users.id)
-    .notNull(),
-
-  status: text("status").default("pending").notNull(),
-
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  id: uuid("id").defaultRandom().primaryKey(),
+  senderId: uuid("sender_id").notNull(),
+  receiverId: uuid("receiver_id").notNull(),
+  status: text("status").default("pending"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
